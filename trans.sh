@@ -584,6 +584,10 @@ get_password_windows_administrator_base64() {
     get_config password-windows-administrator-base64
 }
 
+get_password_windows_user_base64() {
+    get_config password-windows-user-base64
+}
+
 get_password_plaintext() {
     get_config password-plaintext
 }
@@ -7175,19 +7179,43 @@ EOF
     }
 
     # 修改应答文件
+    apk add xmlstarlet
     download $confhome/windows.xml /tmp/autounattend.xml
     locale=$(get_selected_image_prop 'Default Language')
     use_default_rdp_port=$(is_need_change_rdp_port && echo false || echo true)
-    password_base64=$(get_password_windows_administrator_base64)
+
     # 7601.24214.180801-1700.win7sp1_ldr_escrow_CLIENT_ULTIMATE_x64FRE_en-us.iso Image Name 为空
     # 将 xml Image Name 的值设为空可以正常安装
     sed -i \
         -e "s|%arch%|$arch|" \
         -e "s|%image_name%|$image_name|" \
         -e "s|%locale%|$locale|" \
-        -e "s|%administrator_password%|$password_base64|" \
         -e "s|%use_default_rdp_port%|$use_default_rdp_port|" \
         /tmp/autounattend.xml
+
+    # 账号密码
+    if [ -n "$username" ]; then
+        # 普通账号
+        password_base64=$(get_password_windows_user_base64)
+        xmlstarlet ed -L -N x="urn:schemas-microsoft-com:unattend" \
+            -d "//x:AdministratorPassword" \
+            /tmp/autounattend.xml
+        sed -i \
+            -e "s|%enable_administrator%|0|" \
+            -e "s|%user_username%|$username|" \
+            -e "s|%user_password%|$password_base64|" \
+            /tmp/autounattend.xml
+    else
+        # Administrator
+        password_base64=$(get_password_windows_administrator_base64)
+        xmlstarlet ed -L -N x="urn:schemas-microsoft-com:unattend" \
+            -d "//x:LocalAccounts" \
+            /tmp/autounattend.xml
+        sed -i \
+            -e "s|%enable_administrator%|1|" \
+            -e "s|%administrator_password%|$password_base64|" \
+            /tmp/autounattend.xml
+    fi
 
     # 修改应答文件，分区配置
     if is_efi; then
@@ -7275,12 +7303,12 @@ EOF
     wim_windows_xml=$(get_path_in_correct_case /wim/windows.xml)
     wim_setup_exe=$(get_path_in_correct_case /wim/setup.exe)
 
-    apk add xmlstarlet
     xmlstarlet ed -d '//comment()' /tmp/autounattend.xml >$wim_autounattend_xml
     unix2dos $wim_autounattend_xml
     info "autounattend.xml"
     # 查看最终文件，并屏蔽密码
     xmlstarlet ed -d '//*[name()="AdministratorPassword" or name()="Password"]' $wim_autounattend_xml | cat -n
+
     apk del xmlstarlet
 
     # 避免无参数运行 setup.exe 时自动安装
