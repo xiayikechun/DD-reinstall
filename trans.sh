@@ -2244,10 +2244,8 @@ EOF
         rm -rf $os_dir/var/db/repos/gentoo
         chroot $os_dir emerge --sync
 
-        if [ "$(uname -m)" = x86_64 ]; then
-            # https://packages.gentoo.org/packages/sys-block/io-scheduler-udev-rules
-            chroot $os_dir emerge sys-block/io-scheduler-udev-rules
-        fi
+        # https://wiki.gentoo.org/wiki/Handbook:AMD64/Installation/Tools#Filesystem_tools
+        chroot $os_dir emerge sys-block/io-scheduler-udev-rules
 
         if is_efi; then
             chroot $os_dir emerge sys-fs/dosfstools
@@ -2259,10 +2257,18 @@ EOF
         fi
 
         # 安装 grub + 内核
-        # TODO: 先判断是否有 binpkg，有的话不修改 GRUB_PLATFORMS
         is_efi && grub_platforms="efi-64" || grub_platforms="pc"
         echo GRUB_PLATFORMS=\"$grub_platforms\" >>$os_dir/etc/portage/make.conf
         echo "sys-kernel/installkernel dracut grub" >$os_dir/etc/portage/package.use/installkernel
+
+        # 要设置 root=UUID=xxxx，否则 dracut 会报错
+        # 要注意 root=UUID=xxxx 头尾有空格
+        # https://wiki.gentoo.org/wiki/Installkernel#Install_chroot_check
+        # https://wiki.gentoo.org/wiki/Handbook:AMD64/Installation/Kernel#Chroot_detection
+        uuid=$(chroot $os_dir findmnt -rno UUID /)
+        mkdir -p $os_dir/etc/dracut.conf.d
+        echo "kernel_cmdline=\" root=UUID=$uuid \"" >$os_dir/etc/dracut.conf.d/00-installkernel.conf
+
         chroot $os_dir emerge sys-kernel/gentoo-kernel-bin
     }
 
@@ -3876,6 +3882,7 @@ EOF
         is_password_plaintext && sed -i 's/enforce=none/enforce=everyone/' $os_dir/etc/security/passwdqc.conf
 
         # 下载仓库，选择 profile
+        # https://github.com/gentoo/gentoo/blob/master/profiles/profiles.desc
         chroot $os_dir emerge-webrsync
         profile=$(chroot $os_dir eselect profile list | grep stable | grep systemd |
             awk '{print length($2), $2}' | sort -n | head -1 | awk '{print $2}')
